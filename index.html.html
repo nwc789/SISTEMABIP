@@ -1,0 +1,384 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Leitor de IDs — FIX</title>
+<style>
+  :root { --bg:#0f1320; --panel:#171d2f; --accent:#3ea6ff; --text:#e6eefc; --muted:#9bb0d1; --danger:#ff6b6b; --success:#1dd1a1;}
+  *{ box-sizing:border-box; }
+  body{ margin:0; background:var(--bg); color:var(--text); font-family: Inter, system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif; display:flex; min-height:100vh; align-items:stretch; justify-content:center; }
+  .wrap{ width:min(980px, 100%); padding:20px; }
+  header{ display:flex; align-items:center; justify-content:space-between; gap:12px; margin-bottom:14px; }
+  h1{ font-size:20px; margin:0; letter-spacing:.3px; }
+  .badge{ background:rgba(62,166,255,.18); border:1px solid rgba(62,166,255,.5); color:var(--text); padding:6px 10px; border-radius:999px; font-size:12px; }
+  .grid{ display:grid; grid-template-columns: 1fr 1fr; gap:14px; }
+  .card{ background:var(--panel); border:1px solid #1f2742; border-radius:14px; padding:14px; }
+  .card h2{ font-size:14px; margin:0 0 10px; color:#cfe2ff; font-weight:600; }
+  textarea#cap{ width:100%; height:120px; resize:none; background:#0e1426; color:var(--text); border:1px solid #243056; border-radius:10px; padding:12px; font-size:14px; line-height:1.35; }
+  .row{ display:flex; gap:10px; flex-wrap:wrap; margin-top:10px; }
+  button{ background:var(--accent); color:#001427; border:none; padding:10px 12px; border-radius:10px; font-weight:700; cursor:pointer; }
+  button.secondary{ background:#243056; color:#e6eefc; }
+  button.danger{ background:var(--danger); color:#1b0b0b; }
+  button:disabled{ opacity:.5; cursor:not-allowed; }
+  .list{ background:#0e1426; border:1px solid #243056; border-radius:10px; padding:10px; height:360px; overflow:auto; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+  .item{ display:flex; align-items:center; gap:10px; padding:6px 6px; border-bottom:1px dashed #26345f; }
+  .index{ width:44px; opacity:.7; }
+  .code{ font-size:14px; letter-spacing:.4px; }
+  .footer{ margin-top:12px; font-size:12px; color:var(--muted); display:flex; justify-content:space-between; gap:10px; flex-wrap:wrap;}
+  .pill{ padding:6px 10px; border-radius:999px; background:#0e1426; border:1px solid #243056; }
+  .hint{ font-size:12px; color:#9bb0d1; margin-top:6px; }
+  .switch{ display:flex; align-items:center; gap:8px; }
+  input[type="checkbox"]{ transform:scale(1.1); }
+  @media (max-width:860px){ .grid{ grid-template-columns: 1fr; } .list{ height:260px; } }
+  .overlay{ position: fixed; top: 12px; left: 50%; transform: translateX(-50%); z-index: 9999; display: none; min-width: 320px; max-width: 90vw; }
+  .toast{ background: #0e1426cc; backdrop-filter: blur(4px); border: 2px solid var(--success); color: var(--text); padding: 12px 14px; border-radius: 12px; box-shadow: 0 10px 30px rgba(0,0,0,.4); display: flex; align-items: center; gap: 10px; }
+  .toast .dot{ width:10px; height:10px; border-radius:50%; background: var(--success); }
+  .toast .id{ color: var(--success); font-weight: 800; }
+  .toast.error{ border-color: var(--danger); }
+  .toast.error .dot{ background: var(--danger); }
+  .toast.error .id{ color: var(--danger); }
+</style>
+</head>
+<body>
+  <div class="wrap">
+    <header>
+      <h1>Leitor de IDs — FIX</h1>
+      <div class="badge" id="status">Pronto</div>
+    </header>
+    <div class="grid">
+      <div class="card">
+        <h2>Captura do leitor / colagem de texto</h2>
+        <textarea id="cap" autofocus placeholder="Cole ou bip aqui...&#10;Ex.: ^id^Ç^45778864441^,^sender_id^Ç..."></textarea>
+        <div class="row">
+          <div class="switch"><input type="checkbox" id="dedup" checked><label for="dedup">Evitar duplicados</label></div>
+          <div class="switch"><input type="checkbox" id="autoClear" checked><label for="autoClear">Limpar após capturar</label></div>
+          <button id="btnParse" class="secondary" tabindex="-1">Extrair Agora</button>
+          <button id="btnClear" class="danger" tabindex="-1">Zerar lista</button>
+        </div>
+        <div class="hint">Dica: clique uma vez na página para liberar o som do navegador. O <b>TAB</b> vira quebra de linha aqui.</div>
+      </div>
+      <div class="card">
+        <h2>IDs capturados</h2>
+        <div class="list" id="list"></div>
+        <div class="row" style="margin-top:10px;">
+          <button id="btnCopy" tabindex="-1">Copiar</button>
+          <button id="btnExport" tabindex="-1">Exportar TXT</button>
+          <button id="btnManifest" class="secondary" tabindex="-1">Gerar romaneio</button>
+        </div>
+        <div class="footer">
+          <span class="pill">TOTAL: <b id="total">0</b></span>
+          <span class="pill" id="clock"></span>
+        </div>
+      </div>
+    </div>
+  </div>
+  <div class="overlay" id="overlay" aria-live="assertive" aria-atomic="true">
+    <div class="toast" id="toast">
+      <div class="dot"></div>
+      <div class="txt">✅ Pacote bipado — <span class="id" id="lastId"></span></div>
+    </div>
+  </div>
+  <audio id="sndOk" src="bipado.mp3" preload="auto"></audio>
+  <!-- AJUSTE: usa o nome real do arquivo de erro enviado (erro.mp3) -->
+  <audio id="sndErr" src="erro.mp3" preload="auto"></audio>
+<script>
+(function(){
+  const HIDE_MS=10000,DEBOUNCE_MS=5,STORAGE_KEY='scanner_ids_fix_v1';
+  const els={cap:cap,list:list,total:total,clock:clock,status:status,dedup:dedup,autoClear:autoClear,btnParse:btnParse,btnClear:btnClear,btnCopy:btnCopy,btnExport:btnExport,btnManifest:btnManifest,overlay:overlay,toast:toast,lastId:lastId,sndOk:sndOk,sndErr:sndErr};
+  let ids=[],hideTimer=null,inputTimer=null,audioArmed=false;
+  try{const saved=JSON.parse(localStorage.getItem(STORAGE_KEY)||'[]');if(Array.isArray(saved))ids=saved;}catch(e){}
+  function persist(){localStorage.setItem(STORAGE_KEY,JSON.stringify(ids));}
+  function nowStr(){const d=new Date(),p=n=>String(n).padStart(2,'0');return`${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())} ${p(d.getDate())}/${p(d.getMonth()+1)}/${d.getFullYear()}`;}
+  function setStatus(t){els.status.textContent=t;}
+  function scrollBottom(){els.list.scrollTop=els.list.scrollHeight;}
+  function armAudio(){
+    if(audioArmed) return;
+    audioArmed=true;
+    const warmup = a => a.play().then(()=>{ a.pause(); a.currentTime=0; }).catch(()=>{});
+    warmup(els.sndOk);
+    warmup(els.sndErr);
+  }
+  window.addEventListener('click',armAudio,{ once:true, capture:true });
+  window.addEventListener('keydown',armAudio,{ once:true, capture:true });
+
+  function render(){
+    els.list.innerHTML='';
+    for (let i=0;i<ids.length;i++){
+      const row=document.createElement('div'); row.className='item';
+      const ix=document.createElement('div'); ix.className='index'; ix.textContent=(i+1)+'.';
+      const cd=document.createElement('div'); cd.className='code'; cd.textContent=ids[i];
+      row.appendChild(ix); row.appendChild(cd);
+      els.list.appendChild(row);
+    }
+    els.total.textContent=ids.length;
+    els.clock.textContent=nowStr();
+    scrollBottom();
+  }
+
+  function showPopup(id,isDup){
+    els.lastId.textContent=id;
+    els.toast.classList.toggle('error', !!isDup);
+    els.toast.querySelector('.txt').firstChild.textContent = isDup ? '⛔ Pacote duplicado — ' : '✅ Pacote bipado — ';
+    els.overlay.style.display='none'; void els.overlay.offsetHeight; els.overlay.style.display='block';
+    try{
+      const player = isDup ? els.sndErr : els.sndOk;
+      player.pause(); player.currentTime=0; player.play();
+    }catch(e){
+      // Também sobe no status se o áudio falhar (ex.: arquivo não encontrado)
+      setStatus(isDup ? 'Duplicado (áudio indisponível)' : 'Bipado (áudio indisponível)');
+    }
+    if(hideTimer) clearTimeout(hideTimer);
+    hideTimer = setTimeout(()=> els.overlay.style.display='none', HIDE_MS);
+  }
+
+  function extractIds(text){
+    const out=[];
+    if(!text) return out;
+    const re=/4\d{10}/g;
+    let m;
+    while((m=re.exec(text))!==null){
+      const start=m.index, end=start+m[0].length;
+      const prev=start>0?text[start-1]:'', next=end<text.length?text[end]:'';
+      if(!(/\d/.test(prev)) && !(/\d/.test(next))) out.push(m[0]);
+    }
+    return out;
+  }
+
+  function addFromText(text){
+    const found = extractIds(text);
+    if(found.length===0) return 0;
+    let added=0;
+    const existing = new Set(ids);
+    for(const id of found){
+      const dup = existing.has(id);
+      if(dup){
+        showPopup(id,true);
+        if(els.dedup.checked) continue;
+        // Se não está evitando duplicados, adiciona mas não toca som de sucesso
+        ids.push(id);
+        existing.add(id);
+        added++;
+      } else {
+        // Não é duplicado, adiciona normalmente e toca som de sucesso
+        ids.push(id);
+        existing.add(id);
+        showPopup(id,false);
+        added++;
+      }
+    }
+    if(added>0){ persist(); render(); }
+    return added;
+  }
+
+  function scheduleProcess(){
+    if(inputTimer) clearTimeout(inputTimer);
+    inputTimer=setTimeout(()=>{
+      const text=els.cap.value;
+      const n=addFromText(text);
+      if(n>0) setStatus(`+${n} capturado(s)`);
+      if(els.autoClear.checked && n>0) els.cap.value='';
+    }, DEBOUNCE_MS);
+  }
+
+  els.cap.addEventListener('input', scheduleProcess);
+
+  document.addEventListener('keydown', (e)=>{
+    if (document.activeElement !== els.cap) els.cap.focus();
+    if (e.key === 'Tab'){
+      e.preventDefault();
+      const el=els.cap;
+      const start=el.selectionStart ?? el.value.length;
+      const end=el.selectionEnd ?? el.value.length;
+      el.value = el.value.slice(0,start) + "\n" + el.value.slice(end);
+      el.selectionStart = el.selectionEnd = start+1;
+      scheduleProcess();
+    }
+  }, true);
+
+  window.addEventListener('paste', (e)=>{
+    if(!e.clipboardData) return;
+    const text = e.clipboardData.getData('text');
+    if(text){
+      const n = addFromText(text);
+      if(n>0) setStatus(`+${n} capturado(s)`);
+      if(els.autoClear.checked && n>0) els.cap.value='';
+      e.preventDefault();
+      els.cap.focus();
+    }
+  }, true);
+
+  els.btnParse.addEventListener('click', ()=>{
+    const n=addFromText(els.cap.value);
+    if(n>0) setStatus(`+${n} capturado(s)`);
+    if(els.autoClear.checked && n>0) els.cap.value='';
+    els.cap.focus();
+  });
+
+  els.btnClear.addEventListener('click', ()=>{
+    if(!confirm('Zerar toda a lista?')) return;
+    ids=[]; persist(); render(); els.overlay.style.display='none';
+    setStatus('Lista zerada');
+  });
+
+  els.btnCopy.addEventListener('click', async ()=>{
+    const text=ids.join('\n');
+    try{ await navigator.clipboard.writeText(text); setStatus(`Copiado! (${ids.length})`); }
+    catch(e){ setStatus('Copie manualmente'); }
+  });
+
+  els.btnExport.addEventListener('click', ()=>{
+    const lines = ids.concat([`TOTAL = ${ids.length}`]);
+    const blob = new Blob([lines.join('\n')], {type:'text/plain;charset=utf-8'});
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    const d = new Date(), pad=n=>String(n).padStart(2,'0');
+    const fname = `ids_${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}_${pad(d.getHours())}${pad(d.getMinutes())}${pad(d.getSeconds())}.txt`;
+    a.href = url; a.download = fname; document.body.appendChild(a); a.click(); a.remove(); URL.revokeObjectURL(url);
+  });
+
+  function buildManifestHTML(idsArr){
+    const d=new Date(), pad=n=>String(n).padStart(2,'0');
+    const dataStr = `${pad(d.getDate())}/${pad(d.getMonth()+1)}/${d.getFullYear()}`;
+    
+    // Determina número de colunas baseado na quantidade
+    let numCols = 1;
+    if (idsArr.length > 75) numCols = 4;
+    else if (idsArr.length > 50) numCols = 3;
+    else if (idsArr.length > 25) numCols = 2;
+    
+    // Calcula linhas necessárias
+    const itemsPerCol = Math.ceil(idsArr.length / numCols);
+    
+    // Gera linhas da tabela
+    let rows = '';
+    for (let i = 0; i < itemsPerCol; i++) {
+      rows += '<tr>';
+      for (let col = 0; col < numCols; col++) {
+        const idx = col * itemsPerCol + i;
+        const id = idx < idsArr.length ? idsArr[idx] : '';
+        rows += `<td>${id}</td>`;
+      }
+      rows += '</tr>';
+    }
+    
+    return `<!doctype html><html lang='pt-BR'><head><meta charset='utf-8'><title>Romaneio - TM Logistica</title><style>
+      @page { size: A4 portrait; margin: 10mm; }
+      * { margin: 0; padding: 0; box-sizing: border-box; }
+      body {
+        font-family: Arial, Helvetica, sans-serif;
+        color: #000;
+        padding: 10px;
+        background: #fff;
+      }
+      .header {
+        text-align: center;
+        margin-bottom: 12px;
+      }
+      .title {
+        font-size: 24px;
+        font-weight: bold;
+        margin-bottom: 8px;
+        letter-spacing: 0.5px;
+      }
+      .subtitle {
+        font-size: 14px;
+        font-weight: bold;
+        margin-bottom: 12px;
+      }
+      table {
+        width: 100%;
+        border-collapse: collapse;
+        margin-bottom: 12px;
+      }
+      td {
+        border: 1px solid #000;
+        padding: 3px 6px;
+        font-size: 11px;
+        font-weight: bold;
+        font-family: 'Courier New', monospace;
+        text-align: left;
+      }
+      .total {
+        text-align: center;
+        font-size: 16px;
+        font-weight: bold;
+        margin: 12px 0 10px 0;
+      }
+      .signature {
+        margin-top: 15px;
+        padding-top: 10px;
+      }
+      .signature-label {
+        font-size: 18px;
+        font-weight: bold;
+        display: inline-block;
+        margin-right: 10px;
+      }
+      .signature-line {
+        display: inline-block;
+        border-bottom: 2px solid #000;
+        width: 450px;
+        vertical-align: bottom;
+        height: 25px;
+      }
+      @media print {
+        body { padding: 8px; }
+        .title { font-size: 22px; }
+        .subtitle { font-size: 13px; }
+        td { font-size: 10px; padding: 2px 5px; }
+        .total { font-size: 15px; }
+        .signature-label { font-size: 17px; }
+      }
+    </style></head><body>
+      <div class="header">
+        <div class="title">ROMANEIO - TM LOGISTICA</div>
+        <div class="subtitle">LISTA FLEX DIA ${dataStr}:</div>
+      </div>
+      <table>${rows}</table>
+      <div class="total">TOTAL = ${idsArr.length}</div>
+      <div class="signature">
+        <span class="signature-label">ASSINATURA:</span><span class="signature-line"></span>
+      </div>
+      <script>window.addEventListener('load',()=>setTimeout(()=>window.print(),200));<\/script>
+    </body></html>`;
+  }
+
+  function openManifest(idsArr){
+    const html = buildManifestHTML(idsArr);
+    try{
+      const blob=new Blob([html],{type:'text/html;charset=utf-8'});
+      const url=URL.createObjectURL(blob);
+      const w=window.open(url,'_blank');
+      if(!w) throw new Error('Popup bloqueado');
+      setTimeout(()=>URL.revokeObjectURL(url), 60000);
+      return;
+    }catch(e){
+      try{
+        const dataUrl='data:text/html;charset=utf-8,'+encodeURIComponent(html);
+        const w=window.open(dataUrl,'_blank');
+        if(!w) throw new Error('Popup bloqueado');
+        return;
+      }catch(err){}
+      const blob=new Blob([html],{type:'text/html;charset=utf-8'});
+      const url=URL.createObjectURL(blob);
+      const a=document.createElement('a'); a.href=url; a.download='romaneio.html';
+      document.body.appendChild(a); a.click(); a.remove();
+      setTimeout(()=>URL.revokeObjectURL(url), 1000);
+      alert('Não consegui abrir nova aba (popup bloqueado). Baixei o romaneio como arquivo.');
+    }
+  }
+
+  els.btnManifest.addEventListener('click', ()=>{
+    if(!ids.length){ setStatus('Sem itens para o romaneio'); return; }
+    openManifest(ids);
+    setStatus('Romaneio gerado');
+  });
+
+  window.addEventListener('load', ()=> els.cap.focus());
+  document.body.addEventListener('click', ()=> els.cap.focus());
+
+  render(); setStatus('Pronto');
+})();</script>
+</body>
+</html>
